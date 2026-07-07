@@ -16,7 +16,7 @@ element_type = "Argyris"
 g_load = 1.4       
 
 # [Convergence Parameter] Characteristic mesh size. 
-# For mesh convergence analysis, sequentially change to 0.1, 0.08, 0.05
+# For mesh convergence analysis, sequentially change to 0.12 0.1, 0.08, 0.06, 0.05
 clscale = 0.05     
 
 # [Strict alignment with the publication]
