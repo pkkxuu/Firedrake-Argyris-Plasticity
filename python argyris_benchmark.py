@@ -142,7 +142,7 @@ solver = LinearVariationalSolver(problem, solver_parameters={
 # 5. ITERATION PARAMETERS & PRE-COMPILED EXPRESSIONS
 # =====================================================================
 F_max = g_load  
-b_val = 0.006
+b_val = 0.014
 niter = 20
 nnewt = 10
 epsnewt = 1e-8
