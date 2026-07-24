@@ -32,7 +32,7 @@ def run_simulation(element_type, clscale, output_dir, mesh):
     V_rho = FunctionSpace(mesh, "DG", 0)
     
     if element_type == "Argyris":
-        V_E = VectorFunctionSpace(mesh, "Argyris", 5, dim=3)
+        V_E = VectorFunctionSpace(mesh, "Argyris", 5, dim=3) #declare it as a 2D symmetric tensor
     elif element_type == "HCT":
         V_E = VectorFunctionSpace(mesh, "HCT", 3, dim=3)
         
@@ -50,9 +50,9 @@ def run_simulation(element_type, clscale, output_dir, mesh):
     rho.assign(2e-4) # Initial compatibility modulus
 
     # UFL Helper functions
-    def eps(u): return sym(grad(u))
-    def inc(E): return E[0].dx(1).dx(1) + E[1].dx(0).dx(0) - 2 * E[2].dx(0).dx(1)
-    def as_sym_tensor(vec): return as_tensor([[vec[0], vec[2]], [vec[2], vec[1]]])
+    def eps(u): return sym(grad(u)) #computes the symmetric gradient of the displacement field
+    def inc(E): return E[0].dx(1).dx(1) + E[1].dx(0).dx(0) - 2 * E[2].dx(0).dx(1) #the scalar incompatibility formulation
+    def as_sym_tensor(vec): return as_tensor([[vec[0], vec[2]], [vec[2], vec[1]]]) #reshapes the flat vector into a proper 2x2 symmetric tensor
     def tr_E(vec): return vec[0] + vec[1]
 
     # Material constants
@@ -63,10 +63,10 @@ def run_simulation(element_type, clscale, output_dir, mesh):
     Force_inc = Constant(g_load / nincrements) 
 
     # Dynamic tangent moduli dependent on rho (theta)
-    rho_safe = max_value(rho, 1e-8)
-    mut = kmu / rho_safe
-    mu_val = (mu0 * mut) / (mu0 + mut)
-    kappa_val = kappa0
+    rho_safe = max_value(rho, 1e-8) #to prevent any fatal division-by-zero during the first iteration
+    mut = kmu / rho_safe #plastic effective shear modulus
+    mu_val = (mu0 * mut) / (mu0 + mut) #the total macroscopic shear modulus
+    kappa_val = kappa0 #strictly preserves the volumetric stiffness
     albe_val = kalbe / rho_safe
 
     # Variational Weak Form (LHS)
@@ -88,10 +88,10 @@ def run_simulation(element_type, clscale, output_dir, mesh):
     problem = LinearVariationalProblem(a, L, w_solution)
     solver = LinearVariationalSolver(problem, solver_parameters={
         "ksp_type": "preonly",
-        "pc_type": "lu",
+        "pc_type": "lu", #forces the solver to skip iterative guessing and directly compute the exact LU inverse of the matrix
         "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 500,    
-        "mat_mumps_icntl_24": 1,      
+        "mat_mumps_icntl_14": 500, #500% memory workspace   
+        "mat_mumps_icntl_24": 1, #Null Pivot Detection      
         "pc_factor_shift_type": "NONZERO", 
         "pc_factor_shift_amount": 1e-10
     })
@@ -107,9 +107,9 @@ def run_simulation(element_type, clscale, output_dir, mesh):
     tre_expr, trEE_expr = div(u_sol), tr_E(E_sol)
     e_u_E = eps(u_sol) + as_sym_tensor(E_sol)
 
-    cokappa_expr = 0.5 * (tre_expr + trEE_expr)**2
-    comu_expr = - (1.0/3.0) * (tre_expr + trEE_expr)**2 + inner(e_u_E, e_u_E)
-    coalbe_expr = 0.5 * inc(E_sol)**2
+    cokappa_expr = 0.5 * (tre_expr + trEE_expr)**2 #The volumetric strain energy density
+    comu_expr = - (1.0/3.0) * (tre_expr + trEE_expr)**2 + inner(e_u_E, e_u_E) #The deviatoric strain energy density
+    coalbe_expr = 0.5 * inc(E_sol)**2 #The incompatibility energy density
 
     cokappa_func, comu_func, coalbe_func = Function(V_rho), Function(V_rho), Function(V_rho)
 
@@ -122,21 +122,21 @@ def run_simulation(element_type, clscale, output_dir, mesh):
     I_tensor = Identity(2)
     
     # Extract incompatible strain field
-    V_incE = FunctionSpace(mesh, "DG", 1)
+    V_incE = FunctionSpace(mesh, "DG", 1) #Incompatibility Scalar Field
     incE_vis = Function(V_incE, name="SincEzz")
 
     U_history, F_history = [0.0], [0.0]
 
     # --- LOADING PHASE ---
-    for istep in range(nincrements):
+    for istep in range(nincrements): #incrementally applied force
         current_force = g_load * (istep + 1) / nincrements
         rhol_array = rho.dat.data.copy()
         
         for iteration in range(1, niter):
             rho_old_check = rho.dat.data.copy()
-            solver.solve()
+            solver.solve() #solves the linear PDE system for (u, E, p) using the current tangent moduli
             
-            # Interpolate local energy terms
+            # Interpolate local energy terms, projects the continuous strain energy density fields into discrete cell arrays
             cokappa = cokappa_func.interpolate(cokappa_expr).dat.data
             comu = comu_func.interpolate(comu_expr).dat.data
             coalbe = coalbe_func.interpolate(coalbe_expr).dat.data
@@ -158,7 +158,7 @@ def run_simulation(element_type, clscale, output_dir, mesh):
                 ddh = -0.5 * (np.sqrt(bnewt) / (q**1.5) + np.sqrt(anewt * kmu_f) / ((1 - q)**1.5))
                 q = np.maximum(np.maximum(qstar, epsnewt), np.minimum(1 - epsnewt, q - dh / ddh))
                     
-            rho_new = np.sqrt((anewt * kmu_f) / (1 - q)) - (kmu_f / mu0_f)
+            rho_new = np.sqrt((anewt * kmu_f) / (1 - q)) - (kmu_f / mu0_f) #the new internal compatibility modulus
 
             # Update rho and check global vectorized convergence
             rho.dat.data[:] = np.maximum(rhol_array, np.maximum(rho_new, 2e-4))
@@ -172,7 +172,7 @@ def run_simulation(element_type, clscale, output_dir, mesh):
         # Compute macroscopic stress
         stress_inc_expr = (kappa_val - (2.0/3.0)*mu_val) * (div(u_sol) + tr_E(E_sol)) * I_tensor + 2.0 * mu_val * (eps(u_sol) + as_sym_tensor(E_sol))
         stress_inc = project(stress_inc_expr, V_stress)
-        stress_tot.assign(stress_tot + stress_inc)
+        stress_tot.assign(stress_tot + stress_inc) #accumulates the incremental stress into the total Cauchy stress tensor
         
         E_vis.project(E_tot)
         incE_vis.project(inc(E_tot)) 
@@ -190,12 +190,12 @@ def run_simulation(element_type, clscale, output_dir, mesh):
     rho.assign(2e-4)          
     solver.solve()            
     
-    u_tot.assign(u_tot + u_sol)
+    u_tot.assign(u_tot + u_sol) #Adding the elastic recovery increment to the total fields yields the final Residual Displacement and Residual Strain fields
     E_tot.assign(E_tot + E_sol)
     
     stress_inc_expr = (kappa_val - (2.0/3.0)*mu_val) * (div(u_sol) + tr_E(E_sol)) * I_tensor + 2.0 * mu_val * (eps(u_sol) + as_sym_tensor(E_sol))
     stress_inc = project(stress_inc_expr, V_stress)
-    stress_tot.assign(stress_tot + stress_inc)
+    stress_tot.assign(stress_tot + stress_inc) #Residual Stress field
     
     E_vis.project(E_tot)
     incE_vis.project(inc(E_tot))
@@ -212,7 +212,7 @@ def run_simulation(element_type, clscale, output_dir, mesh):
 # =====================================================================
 # 3. Batch Automation Loop: Parameter Testing
 # =====================================================================
-for clscale in mesh_sizes_to_test:
+for clscale in mesh_sizes_to_test: #enables automated sweeps over mesh characteristic lengths
     print(f"\n" + "="*60)
     print(f" STARTING PARAMETER TEST: clscale = {clscale}")
     print(f"   b={PARAM_B}, kmu={PARAM_KMU}, kalbe={PARAM_KALBE}")
@@ -220,7 +220,7 @@ for clscale in mesh_sizes_to_test:
     
     # Create distinct output directories based on active parameters
     output_dir = f"Results_ParamTest_b{PARAM_B}_k{PARAM_KMU}_chi{PARAM_KALBE}"
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True) #ensures that all simulation results, VTK files, and figures are automatically categorized without manual intervention
     
     # Dynamic Gmsh generation
     if gmsh.isInitialized():
